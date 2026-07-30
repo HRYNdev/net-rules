@@ -33,3 +33,17 @@
 ||counter.yadro.ru^
 ||top-fwz1.mail.ru^
 ||liveinternet.ru^
+
+! Телеметрия, которая проходит мимо общих списков.
+! Проверено: в полном списке HaGeZi этих правил нет, а трафик идёт постоянно.
+||optimizationguide-pa.googleapis.com^
+||mobile.events.data.microsoft.com^
+||s.youtube.com^
+||play.googleapis.com^
+||default.exp-tas.com^
+||browser-intake-datadoghq.com^
+||browser-intake-us5-datadoghq.com^
+||http-intake.logs.us5.datadoghq.com^
+||usage-ping.brave.com^
+||analytics.apify.com^
+||eye.targetads.io^
