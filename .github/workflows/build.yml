@@ -87,13 +87,32 @@ jobs:
           sing-box rule-set convert --type adguard --output dist/ads.srs /tmp/ads-src.txt
           echo "ads.srs: $(stat -c%s dist/ads.srs) байт"
 
-      - name: Проверить, что наборы читаются обратно
+      - name: Проверить наборы
         run: |
           set -e
-          for f in dist/*.srs; do
+          # Обычные наборы проверяем обратной декомпиляцией.
+          for f in dist/main-*.srs; do
             sing-box rule-set decompile --output /tmp/check.json "$f"
-            echo "$f: ок, правил $(python3 -c "import json;print(len(json.load(open('/tmp/check.json'))['rules']))")"
+            echo "$f: читается, правил $(python3 -c "import json;print(len(json.load(open('/tmp/check.json'))['rules']))")"
           done
+
+          # Рекламный набор собран из AdGuard-формата и обратно не разбирается -
+          # проверяем тем, что sing-box принимает его в живом конфиге.
+          cat > /tmp/t.json <<'EOF'
+          {
+            "log": {"level": "error"},
+            "inbounds": [{"type": "socks", "listen": "127.0.0.1", "listen_port": 11999}],
+            "outbounds": [{"type": "direct", "tag": "d"}],
+            "route": {
+              "rules": [{"rule_set": ["ads"], "action": "reject"}],
+              "rule_set": [{"type": "local", "tag": "ads", "format": "binary", "path": "PLACEHOLDER"}],
+              "final": "d"
+            }
+          }
+          EOF
+          sed -i "s|PLACEHOLDER|$(pwd)/dist/ads.srs|" /tmp/t.json
+          sing-box check -c /tmp/t.json
+          echo "ads.srs: принят sing-box, $(stat -c%s dist/ads.srs) байт"
 
       - name: Обновить релиз latest
         env:
