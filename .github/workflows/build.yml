@@ -72,6 +72,21 @@ jobs:
             echo "$n: $(grep -cve '^\s*$' "$f") записей -> $(stat -c%s "dist/$n.srs") байт"
           done
 
+      - name: Собрать рекламный набор
+        run: |
+          set -e
+          # Списки в формате AdGuard, sing-box умеет их конвертировать напрямую.
+          # Это то же, что фильтрует AdGuard дома, но применимо на любом устройстве.
+          curl -sfL --max-time 120 -o /tmp/ads-src.txt \
+            "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/pro.mini.txt"
+          echo "исходник: $(grep -c . /tmp/ads-src.txt) строк"
+
+          # свои правила поверх: то, что мы находили руками и чего нет в общем списке
+          cat src/ads-extra.txt >> /tmp/ads-src.txt 2>/dev/null || true
+
+          sing-box rule-set convert --type adguard --output dist/ads.srs /tmp/ads-src.txt
+          echo "ads.srs: $(stat -c%s dist/ads.srs) байт"
+
       - name: Проверить, что наборы читаются обратно
         run: |
           set -e
