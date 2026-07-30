@@ -37,9 +37,17 @@ do {
 step 3 "сборка: $($st.status)/$($st.conclusion)"
 if ($st.conclusion -ne "success") { Write-Warning "сборка не прошла, на роутере домен уже работает, но до остальных устройств не доедет"; exit 1 }
 
-# --- 4. Забрать свежий набор на раздачу (не ждать 20 минут)
-$vps = ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@77.239.102.44 "/opt/sync-rules.sh; tail -1 /var/log/sync-rules.log" 2>&1
-step 4 "раздача: $($vps | Select-Object -Last 1)"
+# --- 4. Забрать свежий набор на раздачу (не ждать 20 минут).
+# Повторяем: GitHub отдаёт свежий файл не мгновенно после сборки.
+$synced = $false
+foreach ($try in 1..4) {
+    $vps = ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@77.239.102.44 `
+        "/opt/sync-rules.sh; tail -1 /var/log/sync-rules.log" 2>&1
+    $last = ($vps | Select-Object -Last 1)
+    if ($last -match 'неудач 0') { $synced = $true; step 4 "раздача (попытка $try): $last"; break }
+    if ($try -lt 4) { Start-Sleep -Seconds 10 }
+}
+if (-not $synced) { step 4 "раздача: не обновилась, $last" }
 
 # --- 5. Проверка: домен реально в наборе на раздаче и работает на роутере
 $check = ssh -o StrictHostKeyChecking=no root@192.168.10.1 @"

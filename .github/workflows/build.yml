@@ -85,7 +85,31 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-          gh release delete latest --yes --cleanup-tag || true
-          gh release create latest dist/*.srs dist/*.json \
-            --title "latest" \
-            --notes "Собрано автоматически $(date -u '+%Y-%m-%d %H:%M UTC') из src/. Ссылки стабильные: /releases/latest/download/<имя>.srs"
+          # Релиз НЕ удаляем: между удалением и созданием файлы недоступны,
+          # и потребители в этот момент получают 404. Обновляем файлы на месте.
+          if gh release view latest >/dev/null 2>&1; then
+            gh release upload latest dist/*.srs dist/*.json --clobber
+            gh release edit latest --notes "Обновлено $(date -u '+%Y-%m-%d %H:%M UTC') из src/"
+            echo "релиз обновлён без окна недоступности"
+          else
+            gh release create latest dist/*.srs dist/*.json \
+              --title "latest" \
+              --notes "Собрано $(date -u '+%Y-%m-%d %H:%M UTC') из src/"
+            echo "релиз создан"
+          fi
+
+      - name: Убедиться, что файлы реально отдаются
+        run: |
+          set -e
+          for f in main-domains.srs main-subnets.srs; do
+            for i in 1 2 3 4 5; do
+              code=$(curl -sL -o /tmp/$f -w '%{http_code}' \
+                "https://github.com/${{ github.repository }}/releases/latest/download/$f")
+              if [ "$code" = "200" ] && [ -s /tmp/$f ]; then
+                echo "$f: отдаётся, $(stat -c%s /tmp/$f) байт"
+                break
+              fi
+              [ $i -eq 5 ] && { echo "$f: НЕ ОТДАЁТСЯ после 5 попыток"; exit 1; }
+              sleep 5
+            done
+          done
