@@ -1,0 +1,35 @@
+! Свои правила блокировки рекламы поверх общего списка.
+! Формат AdGuard. Сюда попадает то, что нашли руками и чего нет в готовых списках.
+! Проверено браузером на реальных сайтах 30.07.2026.
+
+! Реклама Яндекса, которой не было в общем списке
+||yabs.yandex.ru^
+||adfox.yandex.ru^
+||banners.adfox.net^
+||yandexadexchange.net^
+||awaps.yandex.net^
+
+! Рекламная система Rambler (Лента, Чемпионат и другие их сайты)
+||ssp.rambler.ru^
+||ssp01.rambler.ru^
+||sync.rambler.ru^
+||kraken.rambler.ru^
+||cnt.rambler.ru^
+||vp.rambler.ru^
+
+! Российские рекламные сети
+||relap.io^
+||smi2.ru^
+||marketgid.com^
+||directadvert.ru^
+||luckyads.pro^
+||adriver.ru^
+||betweendigital.com^
+||buzzoola.com^
+||videonow.ru^
+||mgid.com^
+
+! Счётчики и аналитика
+||counter.yadro.ru^
+||top-fwz1.mail.ru^
+||liveinternet.ru^
