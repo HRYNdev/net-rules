@@ -1,0 +1,91 @@
+name: build rule-sets
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'src/**' ]
+  workflow_dispatch:
+  schedule:
+    # раз в сутки, чтобы релиз latest не устаревал даже без правок
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Поставить sing-box (нужен только компилятор наборов)
+        run: |
+          set -e
+          VER=$(curl -sL https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep -oP '"tag_name": "v\K[^"]+')
+          echo "sing-box версия: $VER"
+          curl -sL -o sb.tar.gz "https://github.com/SagerNet/sing-box/releases/download/v${VER}/sing-box-${VER}-linux-amd64.tar.gz"
+          tar -xzf sb.tar.gz --strip-components=1 -C /usr/local/bin "sing-box-${VER}-linux-amd64/sing-box"
+          sing-box version
+
+      - name: Собрать наборы
+        run: |
+          set -e
+          mkdir -p dist
+
+          to_json_domains() {
+            python3 - "$1" > "$2" <<'PY'
+          import json, sys
+          items = []
+          for line in open(sys.argv[1], encoding='utf-8'):
+              s = line.strip()
+              if s and not s.startswith('#'):
+                  items.append(s)
+          json.dump({"version": 3, "rules": [{"domain_suffix": sorted(set(items))}]},
+                    sys.stdout, ensure_ascii=False, indent=1)
+          PY
+          }
+
+          to_json_subnets() {
+            python3 - "$1" > "$2" <<'PY'
+          import json, sys
+          items = []
+          for line in open(sys.argv[1], encoding='utf-8'):
+              s = line.strip()
+              if s and not s.startswith('#'):
+                  items.append(s)
+          json.dump({"version": 3, "rules": [{"ip_cidr": sorted(set(items))}]},
+                    sys.stdout, ensure_ascii=False, indent=1)
+          PY
+          }
+
+          for f in src/*-domains.lst; do
+            n=$(basename "$f" .lst)
+            to_json_domains "$f" "dist/$n.json"
+            sing-box rule-set compile --output "dist/$n.srs" "dist/$n.json"
+            echo "$n: $(grep -cve '^\s*$' "$f") записей -> $(stat -c%s "dist/$n.srs") байт"
+          done
+
+          for f in src/*-subnets.lst; do
+            n=$(basename "$f" .lst)
+            to_json_subnets "$f" "dist/$n.json"
+            sing-box rule-set compile --output "dist/$n.srs" "dist/$n.json"
+            echo "$n: $(grep -cve '^\s*$' "$f") записей -> $(stat -c%s "dist/$n.srs") байт"
+          done
+
+      - name: Проверить, что наборы читаются обратно
+        run: |
+          set -e
+          for f in dist/*.srs; do
+            sing-box rule-set decompile --output /tmp/check.json "$f"
+            echo "$f: ок, правил $(python3 -c "import json;print(len(json.load(open('/tmp/check.json'))['rules']))")"
+          done
+
+      - name: Обновить релиз latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest dist/*.srs dist/*.json \
+            --title "latest" \
+            --notes "Собрано автоматически $(date -u '+%Y-%m-%d %H:%M UTC') из src/. Ссылки стабильные: /releases/latest/download/<имя>.srs"
