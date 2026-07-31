@@ -39,7 +39,6 @@
 ||optimizationguide-pa.googleapis.com^
 ||mobile.events.data.microsoft.com^
 ||s.youtube.com^
-||play.googleapis.com^
 ||default.exp-tas.com^
 ||browser-intake-datadoghq.com^
 ||browser-intake-us5-datadoghq.com^
