@@ -84,6 +84,33 @@ jobs:
           # свои правила поверх: то, что мы находили руками и чего нет в общем списке
           cat src/ads-extra.txt >> /tmp/ads-src.txt 2>/dev/null || true
 
+          # белый список: вырезаем блокировки того, что ломает нужные сервисы.
+          # Общие списки временами кладут туда боевые домены (gvt2.com у Google Play),
+          # и один такой домен выглядит как "интернет сломался", а не как "реклама режется".
+          python3 - <<'PY'
+          import re, os
+          path = 'src/ads-allow.txt'
+          allow = set()
+          if os.path.exists(path):
+              for line in open(path, encoding='utf-8'):
+                  s = line.strip().lower()
+                  if s and not s.startswith(('#', '!')):
+                      allow.add(s)
+          lines = open('/tmp/ads-src.txt', encoding='utf-8').read().splitlines()
+          keep, dropped = [], []
+          for line in lines:
+              m = re.match(r'^\|\|([^\^/\$]+)\^?', line.strip())
+              d = m.group(1).lower() if m else None
+              if d and any(d == a or d.endswith('.' + a) for a in allow):
+                  dropped.append(line.strip())
+              else:
+                  keep.append(line)
+          open('/tmp/ads-src.txt', 'w', encoding='utf-8').write('\n'.join(keep) + '\n')
+          print(f'белый список: {len(allow)} доменов, вырезано правил {len(dropped)}')
+          for l in dropped:
+              print('  снято:', l)
+          PY
+
           sing-box rule-set convert --type adguard --output dist/ads.srs /tmp/ads-src.txt
           echo "ads.srs: $(stat -c%s dist/ads.srs) байт"
 
