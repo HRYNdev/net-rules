@@ -114,6 +114,9 @@ jobs:
           sing-box rule-set convert --type adguard --output dist/ads.srs /tmp/ads-src.txt
           echo "ads.srs: $(stat -c%s dist/ads.srs) байт"
 
+      - name: Маршрут против рекламы (домен нельзя одновременно гнать и резать)
+        run: python3 tools/check-route-conflict.py /tmp/ads-src.txt
+
       - name: Проверить наборы
         run: |
           set -e

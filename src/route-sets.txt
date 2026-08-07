@@ -1,0 +1,22 @@
+# Наборы, по которым клиент гонит трафик в тоннель (route.rule_set в конфиге).
+# Лежат на сервере подписки, в этом репозитории их нет, поэтому проверка
+# скачивает их оттуда. Одна строка - одно имя файла без .srs.
+anime
+cloudflare
+cloudfront
+digitalocean
+discord
+geoblock
+google_ai
+google_play
+hdrezka
+hetzner
+hodca
+meta
+ovh
+roblox
+russia_inside
+telegram
+tiktok
+twitter
+youtube
