@@ -21,9 +21,31 @@ jobs:
       - name: Поставить sing-box (нужен только компилятор наборов)
         run: |
           set -e
-          VER=$(curl -sL https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep -oP '"tag_name": "v\K[^"]+')
+          # Берём не "последний тег", а последний релиз, в котором РЕАЛЬНО лежит сборка
+          # под linux-amd64, и ссылку берём из самого релиза, а не склеиваем из номера.
+          # 09.08.2026 latest указал на v1.13.17 - релиз только с APK для андроида,
+          # ядра там нет, склеенная ссылка вела в никуда, curl молча клал страницу
+          # "Not Found" (9 байт) в файл и выходил с кодом 0, а падало всё на распаковке.
+          # Флаг prerelease не спасает: ту же неделю бета 1.14.0-beta.11 висела с
+          # prerelease=false и была бы "последней версией", поэтому отсекаем и по имени тега.
+          curl -fsSL 'https://api.github.com/repos/SagerNet/sing-box/releases?per_page=30' -o /tmp/sb-rel.json
+          python3 - > /tmp/sb.env <<'PY'
+          import json, re, sys
+          for r in json.load(open('/tmp/sb-rel.json')):
+              if r['draft'] or r['prerelease'] or re.search(r'alpha|beta|rc', r['tag_name'], re.I):
+                  continue
+              for a in r['assets']:
+                  m = re.fullmatch(r'sing-box-(.+)-linux-amd64\.tar\.gz', a['name'])
+                  if m:
+                      print('VER=' + m.group(1))
+                      print('URL=' + a['browser_download_url'])
+                      sys.exit(0)
+          sys.exit('среди 30 последних релизов sing-box нет сборки под linux-amd64')
+          PY
+          . /tmp/sb.env
           echo "sing-box версия: $VER"
-          curl -sL -o sb.tar.gz "https://github.com/SagerNet/sing-box/releases/download/v${VER}/sing-box-${VER}-linux-amd64.tar.gz"
+          # -f обязателен: без него curl молча кладёт страницу ошибки в файл и выходит с нулём.
+          curl -fsSL -o sb.tar.gz "$URL"
           tar -xzf sb.tar.gz --strip-components=1 -C /usr/local/bin "sing-box-${VER}-linux-amd64/sing-box"
           sing-box version
 
@@ -120,10 +142,48 @@ jobs:
       - name: Проверить наборы
         run: |
           set -e
-          # Обычные наборы проверяем обратной декомпиляцией.
+          # Обычные наборы проверяем обратной декомпиляцией И СВЕРКОЙ С ИСХОДНИКОМ.
+          # Считать правила бесполезно: все домены лежат в ОДНОМ правиле, поэтому
+          # прежняя строка печатала "правил 1" и на полном наборе, и на пустом.
+          # Пустой набор (17 байт) уезжал бы в релиз latest, роутер и телефоны забрали
+          # бы его по расписанию, и наружу это выглядит как "всё пошло мимо туннеля".
+          # Считать записи числом тоже нельзя: sing-box законно склеивает соседние
+          # подсети (2001:b28:f23c::/48 + f23d::/48 -> f23c::/47), охват не меняется.
+          # Поэтому проверяем ПОКРЫТИЕ: каждая строка исходника обязана попадать в набор.
           for f in dist/main-*.srs; do
             sing-box rule-set decompile --output /tmp/check.json "$f"
-            echo "$f: читается, правил $(python3 -c "import json;print(len(json.load(open('/tmp/check.json'))['rules']))")"
+            SRC="src/$(basename "$f" .srs).lst" python3 - <<'PY'
+          import ipaddress, json, os, sys
+
+          src = []
+          for line in open(os.environ['SRC'], encoding='utf-8'):
+              t = line.strip()
+              if t and not t.startswith('#'):
+                  src.append(t)
+
+          suffixes, nets = [], []
+          for r in json.load(open('/tmp/check.json')).get('rules', []):
+              suffixes += r.get('domain_suffix', [])
+              nets += [ipaddress.ip_network(c) for c in r.get('ip_cidr', [])]
+
+          if not suffixes and not nets:
+              sys.exit(f'{os.environ["SRC"]}: НАБОР ПУСТ - в него не попало ни одной записи')
+
+          lost = []
+          for item in src:
+              if '/' in item:
+                  n = ipaddress.ip_network(item)
+                  ok = any(n.version == m.version and n.subnet_of(m) for m in nets)
+              else:
+                  ok = any(item == s or item.endswith('.' + s) for s in suffixes)
+              if not ok:
+                  lost.append(item)
+
+          if lost:
+              sys.exit(f'{os.environ["SRC"]}: в набор НЕ попали {len(lost)} записей: ' + ', '.join(lost[:10]))
+          print(f'{os.environ["SRC"]}: покрыты все {len(src)} записей '
+                f'(в наборе доменов {len(suffixes)}, подсетей {len(nets)})')
+          PY
           done
 
           # Рекламный набор собран из AdGuard-формата и обратно не разбирается -
@@ -175,5 +235,34 @@ jobs:
               fi
               [ $i -eq 5 ] && { echo "$f: НЕ ОТДАЁТСЯ после 5 попыток"; exit 1; }
               sleep 5
+            done
+          done
+
+      # Предыдущий шаг проверяет github.com, а роутер и телефоны качают с subkv -
+      # это разные двери, и зелёный на первой ничего не говорит о второй.
+      # Синхронизатор на VPS ходит раз в 20 минут, поэтому не сверяем мгновенно,
+      # а ждём: файл у пользователя обязан стать тем же, что мы только что собрали.
+      - name: Дождаться, пока правила доедут до пользователя (subkv)
+        timeout-minutes: 30
+        run: |
+          set -e
+          BASE="https://subkv.chickenkiller.com/rules"
+          FILES="main-domains.srs main-subnets.srs ads.srs"
+          for f in $FILES; do
+            want=$(sha256sum "dist/$f" | cut -d' ' -f1)
+            for i in $(seq 1 27); do
+              code=$(curl -sL -o "/tmp/pub-$f" -w '%{http_code}' --max-time 30 "$BASE/$f" || echo 000)
+              got=$(sha256sum "/tmp/pub-$f" 2>/dev/null | cut -d' ' -f1)
+              if [ "$code" = "200" ] && [ "$want" = "$got" ]; then
+                echo "$f: доехал до subkv ($(stat -c%s /tmp/pub-$f) байт, ждали $((i-1)) мин)"
+                break
+              fi
+              if [ "$i" -eq 27 ]; then
+                echo "$f: за 26 минут НЕ доехал до subkv (код $code)."
+                echo "  ждали sha256 $want, лежит $got"
+                echo "  смотреть /opt/sync-rules.sh на VPS - при неудаче он молча оставляет прежнее"
+                exit 1
+              fi
+              sleep 60
             done
           done
