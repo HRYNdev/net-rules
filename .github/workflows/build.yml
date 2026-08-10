@@ -19,6 +19,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Поставить sing-box (нужен только компилятор наборов)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           # Берём не "последний тег", а последний релиз, в котором РЕАЛЬНО лежит сборка
@@ -28,7 +30,11 @@ jobs:
           # "Not Found" (9 байт) в файл и выходил с кодом 0, а падало всё на распаковке.
           # Флаг prerelease не спасает: ту же неделю бета 1.14.0-beta.11 висела с
           # prerelease=false и была бы "последней версией", поэтому отсекаем и по имени тега.
-          curl -fsSL 'https://api.github.com/repos/SagerNet/sing-box/releases?per_page=30' -o /tmp/sb-rel.json
+          # Спрашиваем API С ТОКЕНОМ. Без него счёт идёт по адресу раннера, общему на всех,
+          # и 10.08.2026 сборка получила 403 на ровном месте: чужие прогоны выбрали лимит.
+          # С токеном лимит свой и на порядок выше.
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            'https://api.github.com/repos/SagerNet/sing-box/releases?per_page=30' -o /tmp/sb-rel.json
           python3 - > /tmp/sb.env <<'PY'
           import json, re, sys
           for r in json.load(open('/tmp/sb-rel.json')):
