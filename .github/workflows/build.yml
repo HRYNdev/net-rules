@@ -95,12 +95,55 @@ jobs:
           done
 
       - name: Собрать рекламный набор
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           # Списки в формате AdGuard, sing-box умеет их конвертировать напрямую.
           # Это то же, что фильтрует AdGuard дома, но применимо на любом устройстве.
-          curl -sfL --max-time 120 -o /tmp/ads-src.txt \
-            "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/pro.mini.txt"
+          #
+          # Источников ДВА, и это разные хозяева, а не зеркала одного: 10.08.2026 с
+          # GitHub исчез весь аккаунт hagezi (репозиторий, релизы, jsDelivr - всё 404),
+          # и одна мёртвая ссылка остановила ВЕСЬ релиз вместе с маршрутами Телеграма,
+          # которые к рекламе отношения не имеют.
+          ADS_SRC=""
+          for u in \
+            "https://small.oisd.nl/abp" \
+            "https://raw.githubusercontent.com/sjhgvr/oisd/main/abp_small.txt" ; do
+            if ! curl -sfL --max-time 120 -o /tmp/ads-src.txt "$u"; then
+              echo "ПРОПУСК: $u не ответил"
+              continue
+            fi
+            # Пустой или обрезанный ответ - это не источник, а тишина, которую легко
+            # принять за "рекламы стало меньше". Порог с запасом: на 10.08.2026 в
+            # списке 57 033 правила.
+            n=$(grep -c '^||' /tmp/ads-src.txt || true)
+            if [ "$n" -lt 20000 ]; then
+              echo "ПРОПУСК: $u отдал $n правил - на список не похоже"
+              continue
+            fi
+            ADS_SRC="$u"; echo "источник: $u, правил $n"; break
+          done
+
+          if [ -z "$ADS_SRC" ]; then
+            # Ни один источник не ответил. Весь релиз из-за этого не роняем: без него
+            # у пользователя перестаёт обновляться тоннель, а это хуже вчерашней рекламы.
+            # Берём ads.srs из прошлого релиза - но НЕ бесконечно: через 7 суток
+            # молчания это уже не заминка, а тихо протухший набор.
+            echo "::warning::источники рекламного списка недоступны, беру ads.srs из релиза latest"
+            gh release download latest --pattern ads.srs --dir dist --clobber
+            upd=$(gh api "repos/${{ github.repository }}/releases/tags/latest" \
+                  --jq '.assets[] | select(.name=="ads.srs") | .updated_at')
+            age=$(( ( $(date -u +%s) - $(date -u -d "$upd" +%s) ) / 86400 ))
+            echo "прошлый ads.srs собран $upd, это $age сут назад"
+            if [ "$age" -ge 7 ]; then
+              echo "::error::рекламный набор не обновлялся $age сут, а источники всё молчат - это уже поломка, а не заминка"
+              exit 1
+            fi
+            echo "ADS_FALLBACK=$age" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
           echo "исходник: $(grep -c . /tmp/ads-src.txt) строк"
 
           # свои правила поверх: то, что мы находили руками и чего нет в общем списке
@@ -137,7 +180,14 @@ jobs:
           echo "ads.srs: $(stat -c%s dist/ads.srs) байт"
 
       - name: Маршрут против рекламы (домен нельзя одновременно гнать и резать)
-        run: python3 tools/check-route-conflict.py /tmp/ads-src.txt
+        run: |
+          if [ -n "$ADS_FALLBACK" ]; then
+            # Исходника нет - набор взят готовым из прошлого релиза. Проверку он уже
+            # проходил, когда собирался; молча пропускать всё равно нельзя.
+            echo "::warning::ads.srs из прошлого релиза ($ADS_FALLBACK сут), исходника нет - проверку конфликтов пропускаю"
+            exit 0
+          fi
+          python3 tools/check-route-conflict.py /tmp/ads-src.txt
 
       - name: Проверить наборы
         run: |
@@ -209,11 +259,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
+          NOTE=""
+          if [ -n "$ADS_FALLBACK" ]; then
+            # Тот же самый файл заливать обратно НЕЛЬЗЯ: upload обновит ему дату, срок
+            # годности из шага сборки обнулится на каждом прогоне и не наступит никогда.
+            # Он и так лежит в релизе - просто не трогаем его.
+            rm -f dist/ads.srs
+            NOTE=$'\n\nВНИМАНИЕ: рекламный набор не обновлялся, источники молчат. '
+            NOTE="$NOTE""ads.srs в релизе прежний, ему $ADS_FALLBACK сут."
+          fi
           # Релиз НЕ удаляем: между удалением и созданием файлы недоступны,
           # и потребители в этот момент получают 404. Обновляем файлы на месте.
           if gh release view latest >/dev/null 2>&1; then
             gh release upload latest dist/*.srs dist/*.json --clobber
-            gh release edit latest --notes "Обновлено $(date -u '+%Y-%m-%d %H:%M UTC') из src/"
+            gh release edit latest --notes "Обновлено $(date -u '+%Y-%m-%d %H:%M UTC') из src/$NOTE"
             echo "релиз обновлён без окна недоступности"
           else
             gh release create latest dist/*.srs dist/*.json \
@@ -248,6 +307,12 @@ jobs:
           set -e
           BASE="https://subkv.chickenkiller.com/rules"
           FILES="main-domains.srs main-subnets.srs ads.srs"
+          # В режиме запасного набора ads.srs в релиз не заливался и из dist убран -
+          # сверять его нечем и не с чем, он там прежний и доехал ещё в прошлый раз.
+          if [ -n "$ADS_FALLBACK" ]; then
+            FILES="main-domains.srs main-subnets.srs"
+            echo "ads.srs пропускаю: набор прежний, релиз его не обновлял"
+          fi
           for f in $FILES; do
             want=$(sha256sum "dist/$f" | cut -d' ' -f1)
             for i in $(seq 1 27); do
