@@ -185,6 +185,157 @@ jobs:
           sing-box rule-set convert --type adguard --output dist/ads.srs /tmp/ads-src.txt
           echo "ads.srs: $(stat -c%s dist/ads.srs) байт"
 
+      - name: Собрать набор заблокированного в РФ
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          # Зачем: свой список это 256 доменов, руками догонять блокировки бессмысленно.
+          # Реестр даёт разом десятки тысяч имён, и «занести в прокси всё что может
+          # пригодиться» перестаёт быть ручной работой.
+          #
+          # ПОЧЕМУ БЕРЁМ ВЕСЬ РЕЕСТР, А НЕ ТОП. Разбор 13.08.2026 предлагал три объёма:
+          # весь (81 061 домен, 505 КБ), топ-1М (6521, 41 КБ), топ-100k (1833, 11 КБ).
+          # Взят весь, потому что ломается как раз хвост: на выборке 50 хостов 12.08 висели
+          # opensource.com, illumos.org, ieee802.org, reactos.org — их нет ни в одном топе,
+          # и ни один урезанный вариант их бы не поймал. Вес рядом с ads.srs (448 КБ) не
+          # разница, а мёртвые домены в наборе не срабатывают вовсе — они не стоят ничего.
+          #
+          # Стоп-лист и вычет рекламы ниже — не косметика: чужой источник мы не контролируем,
+          # а домен, попавший одновременно в маршрут и в reject, молча отвергается (reject
+          # стоит выше маршрута), и снаружи это выглядит как «сайт не работает».
+          SRC=https://raw.githubusercontent.com/1andrevich/Re-filter-lists/main/domains_all.lst
+          if ! curl -fsSL -m 120 "$SRC" -o /tmp/blocked-src.lst; then
+            echo "::warning::реестр заблокированного недоступен, беру набор из релиза latest"
+            gh release download latest --pattern blocked-domains.srs --dir dist --clobber
+            exit 0
+          fi
+
+          # Тишина вместо списка — это не «блокировок стало меньше». Порог с запасом:
+          # на 13.08.2026 в источнике 81 061 домен.
+          n=$(grep -cve '^\s*$' /tmp/blocked-src.lst)
+          if [ "$n" -lt 50000 ]; then
+            echo "::warning::реестр отдал $n строк — на список не похоже, беру набор из релиза latest"
+            gh release download latest --pattern blocked-domains.srs --dir dist --clobber
+            exit 0
+          fi
+
+          # Наши сервисы не должны уезжать в туннель никогда. На 13.08.2026 в источнике их
+          # нет ни одного, но это свойство чужого файла, а не наша гарантия.
+          cat > /tmp/blocked-stop.txt <<'STOP'
+          sberbank.ru
+          sbrf.ru
+          gosuslugi.ru
+          nalog.ru
+          mos.ru
+          vtb.ru
+          tinkoff.ru
+          tbank.ru
+          alfabank.ru
+          gazprombank.ru
+          psbank.ru
+          raiffeisen.ru
+          sovcombank.ru
+          rshb.ru
+          open.ru
+          mkb.ru
+          yoomoney.ru
+          qiwi.com
+          nspk.ru
+          ozon.ru
+          wildberries.ru
+          avito.ru
+          dns-shop.ru
+          mvideo.ru
+          citilink.ru
+          lamoda.ru
+          mts.ru
+          megafon.ru
+          beeline.ru
+          tele2.ru
+          rt.ru
+          yandex.ru
+          ya.ru
+          mail.ru
+          vk.com
+          ok.ru
+          hh.ru
+          2gis.ru
+          STOP
+
+          # Рекламный исходник может отсутствовать (шаг выше ушёл на запасной набор) —
+          # тогда вычет рекламы просто не делаем, а не роняем сборку.
+          ADS_FILE=/tmp/ads-src.txt
+          [ -f "$ADS_FILE" ] || ADS_FILE=""
+
+          ADS_FILE="$ADS_FILE" python3 - /tmp/blocked-src.lst /tmp/blocked-stop.txt > dist/blocked-domains.json <<'PY'
+          import json, os, re, sys
+
+          stop = {l.strip() for l in open(sys.argv[2], encoding='utf-8') if l.strip()}
+
+          # Домены, которые режет наш же ads-набор. Гнать их в туннель бессмысленно:
+          # reject стоит выше маршрута, они всё равно отвергаются, а место в наборе занимают.
+          ads = set()
+          ads_path = os.environ.get('ADS_FILE') or ''
+          if ads_path and os.path.exists(ads_path):
+              for line in open(ads_path, encoding='utf-8'):
+                  m = re.match(r'^\|\|([^\^/$]+)\^', line.strip())
+                  if m:
+                      ads.add(m.group(1).lower())
+
+          def pokryt(d, mnozhestvo):
+              """d или любой его родительский домен есть в множестве."""
+              chasti = d.split('.')
+              return any('.'.join(chasti[i:]) in mnozhestvo for i in range(len(chasti)))
+
+          syroe = []
+          for line in open(sys.argv[1], encoding='utf-8'):
+              s = line.strip().lower().rstrip('.')
+              if not s or s.startswith('#') or '.' not in s:
+                  continue
+              syroe.append(s)
+
+          vsego = len(syroe)
+          bez_stop = [d for d in syroe if not pokryt(d, stop)]
+          snyato_stop = vsego - len(bez_stop)
+
+          bez_ads = [d for d in bez_stop if not pokryt(d, ads)] if ads else bez_stop
+          snyato_ads = len(bez_stop) - len(bez_ads)
+
+          # Схлопывание: правило domain_suffix покрывает и поддомены, поэтому при живом
+          # апексе поддомен в наборе — чистый вес без охвата.
+          nabor = set(bez_ads)
+          itog = sorted(d for d in nabor
+                        if not any('.'.join(d.split('.')[i:]) in nabor
+                                   for i in range(1, len(d.split('.')))))
+          snyato_izb = len(bez_ads) - len(itog)
+
+          if len(itog) < 30000:
+              sys.exit(f'после фильтров осталось {len(itog)} доменов — на реестр не похоже, не выпускаю')
+
+          # Контроль в обе стороны: то, что ломалось у Вовы, обязано попасть; то, что
+          # обязано ходить напрямую, — не попасть ни в каком виде.
+          dolzhny = ['proton.me', 'rumble.com', 'bsky.app', 'messenger.com', 'archive.is']
+          zapreweny = ['sberbank.ru', 'gosuslugi.ru', 'ozon.ru', 'wildberries.ru', 'ya.ru']
+          v_nabore = set(itog)
+          net = [d for d in dolzhny if not pokryt(d, v_nabore)]
+          lishnie = [d for d in zapreweny if pokryt(d, v_nabore)]
+          if net:
+              sys.exit('контроль: в набор НЕ попали ' + ', '.join(net))
+          if lishnie:
+              sys.exit('контроль: в набор попало запрещённое ' + ', '.join(lishnie))
+
+          print(f'реестр: {vsego} в источнике, снято по стоп-листу {snyato_stop}, '
+                f'по рекламе {snyato_ads}, избыточных поддоменов {snyato_izb} '
+                f'-> в наборе {len(itog)}', file=sys.stderr)
+
+          json.dump({"version": 3, "rules": [{"domain_suffix": itog}]},
+                    sys.stdout, ensure_ascii=False)
+          PY
+
+          sing-box rule-set compile --output dist/blocked-domains.srs dist/blocked-domains.json
+          echo "blocked-domains.srs: $(stat -c%s dist/blocked-domains.srs) байт"
+
       - name: Маршрут против рекламы (домен нельзя одновременно гнать и резать)
         run: |
           if [ -n "$ADS_FALLBACK" ]; then
@@ -312,11 +463,11 @@ jobs:
         run: |
           set -e
           BASE="https://subkv.chickenkiller.com/rules"
-          FILES="main-domains.srs main-subnets.srs ads.srs"
+          FILES="main-domains.srs main-subnets.srs ads.srs blocked-domains.srs"
           # В режиме запасного набора ads.srs в релиз не заливался и из dist убран -
           # сверять его нечем и не с чем, он там прежний и доехал ещё в прошлый раз.
           if [ -n "$ADS_FALLBACK" ]; then
-            FILES="main-domains.srs main-subnets.srs"
+            FILES="main-domains.srs main-subnets.srs blocked-domains.srs"
             echo "ads.srs пропускаю: набор прежний, релиз его не обновлял"
           fi
           for f in $FILES; do
