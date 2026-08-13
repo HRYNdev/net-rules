@@ -1,4 +1,3 @@
-﻿addyosmani.com
 ai.google.dev
 airbnb.com
 aistudio.google.com
@@ -15,6 +14,7 @@ android.googleapis.com
 andromeda.io.mi.com
 aniboom.one
 anthropic.com
+api-dashboard.search.brave.com
 api.anthropic.com
 api.cerebras.ai
 api.curseforge.com
@@ -28,7 +28,6 @@ api.whatsapp.com
 api.x.ai
 api2.cursor.sh
 api2.mangalib.me
-api-dashboard.search.brave.com
 app.mi.com
 auth.docker.io
 auth.openai.com
@@ -38,12 +37,12 @@ botlearn.ai
 brawlstars.com
 bstatic.com
 camo.githubusercontent.com
+cdn-lfs.huggingface.co
 cdn.growthbook.io
 cdn.openai.com
 cdn.usefathom.com
 cdn.whatsapp.net
 cdninstagram.com
-cdn-lfs.huggingface.co
 cdnlibs.org
 cerebras.ai
 chat.deepseek.com
@@ -86,8 +85,8 @@ epicgames.dev
 facebook.com
 fal.ai
 faq.whatsapp.com
-fast.io
 fast-torrent.ru
+fast.io
 fb.com
 fbcdn.net
 fcm.googleapis.com
@@ -114,8 +113,8 @@ haydaygame.com
 hentaicdn.org
 hentailib.me
 hentailib.org
-hermesdesktop.xyz
 hermes-workspace.com
+hermesdesktop.xyz
 hf.co
 honkaiimpact3.com
 honkaistarrail.com
@@ -126,6 +125,7 @@ huggingface.co
 i.mi.com
 ibytedtos.com
 ibyteimg.com
+ieee802.org
 img.cdngos.com
 imglib.info
 imgslib.link
@@ -171,6 +171,7 @@ oaistatic.com
 oaiusercontent.com
 objects.githubusercontent.com
 openai.com
+opensource.com
 ot.io.mi.com
 paypal.com
 paypalobjects.com
@@ -191,8 +192,8 @@ pximg.net
 pypi.org
 pythonhosted.org
 raw.githubusercontent.com
-registry.npmjs.org
 registry-1.docker.io
+registry.npmjs.org
 releases.yourok.ru
 replicate.com
 rgpub.io
@@ -205,8 +206,8 @@ signal.org
 smartmycar.com
 sndcdn.com
 snssdk.com
-software.download.prss.microsoft.com
 software-download.microsoft.com
+software.download.prss.microsoft.com
 spoti.fi
 spotifycdn.com
 squadbustersgame.com
@@ -246,11 +247,12 @@ x.com
 xiaomi.com
 xiaomiev.com
 youtu.be
+youtube-nocookie.com
 youtubei.googleapis.com
 youtubekids.com
-youtube-nocookie.com
 yt.be
 ytimg.com
 zoom.com
 zoom.us
 zoomgov.com
+﻿addyosmani.com
