@@ -9,13 +9,25 @@ function step($n, $t) { "[{0,5:N1}с] {1}" -f ((Get-Date)-$t0).TotalSeconds, $t 
 
 Set-Location $repo
 
+# Нормализуем ДО роутера, чтобы на роутер и в репозиторий уехало одно и то же имя.
+# Нижний регистр: в SNI и в DNS-запросе имя приходит строчным, а sing-box сравнивает
+# суффикс строкой - "GitHub.com" в наборе не совпадёт ни с чем.
+$Domains = $Domains | ForEach-Object { $_.TrimStart([char]0xFEFF).Trim().ToLower() } |
+    Where-Object { $_ -ne '' }
+
 # --- 1. Мгновенно на роутере: срочный набор + перечитка конфига без перезапуска
 $piCmd = "/root/urgent/add-domain.sh " + ($Domains -join " ")
 $pi = ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@192.168.10.1 $piCmd 2>&1
 step 1 "роутер: $($pi -join '; ')"
 
 # --- 2. В репозиторий: чтобы доехало до всех устройств и осталось навсегда
-$cur = Get-Content "src\main-domains.lst" | Where-Object { $_ -ne '' }
+# TrimStart по U+FEFF обязателен: Get-Content отдаёт метку порядка байт как часть
+# первой строки, скрипт её сохранял, сортировка уводила строку в конец файла - и
+# домен уезжал в набор с невидимым префиксом. Ровно так addyosmani.com 14 суток
+# лежал в релизе latest, не совпадая ни с одним запросом.
+$cur = Get-Content "src\main-domains.lst" |
+    ForEach-Object { $_.TrimStart([char]0xFEFF).Trim().ToLower() } |
+    Where-Object { $_ -ne '' }
 $add = $Domains | Where-Object { $cur -notcontains $_ }
 if ($add) {
     (($cur + $add) | Sort-Object -Unique) | Out-File "src\main-domains.lst" -Encoding utf8
