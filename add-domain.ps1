@@ -33,7 +33,18 @@ if ($add) {
     (($cur + $add) | Sort-Object -Unique) | Out-File "src\main-domains.lst" -Encoding utf8
     git add -A | Out-Null
     git -c user.name="HRYNdev" -c user.email="vladimirshev10@gmail.com" commit -q -m "добавлены домены: $($add -join ', ')" | Out-Null
-    git push -q 2>&1 | Out-Null
+    # git пишет в stderr не только ошибки: GitHub присылает туда уведомление
+    # "Bypassed rule violations for refs/heads/main". При $ErrorActionPreference="Stop"
+    # PowerShell 5.1 превращает любую строку stderr нативной команды в NativeCommandError
+    # и роняет скрипт на успешном пуше (поймано 25.08.2026: шаги 1-2 прошли, 3-5 нет).
+    # Поэтому вокруг пуша ослабляем реакцию и судим по коду возврата, а не по stderr.
+    $prevEA = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $pushOut = (& git push -q 2>&1 | Out-String).Trim()
+    $pushCode = $LASTEXITCODE
+    $ErrorActionPreference = $prevEA
+    if ($pushCode -ne 0) { throw "git push не прошёл (код $pushCode): $pushOut" }
+    if ($pushOut) { step 2 "пуш прошёл, git сказал в stderr: $($pushOut -replace '\s+',' ')" }
     step 2 "репозиторий: добавлено $($add.Count), всего $((Get-Content 'src\main-domains.lst' | Where-Object {$_ -ne ''}).Count)"
 } else {
     step 2 "репозиторий: все домены уже были"
