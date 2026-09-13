@@ -4,6 +4,13 @@ on:
   push:
     branches: [ main ]
     paths: [ 'src/**' ]
+  # На pull request сценарий гоняется БЕЗ фильтра paths и без публикации: до 13.09.2026
+  # ни один прогон не висел на этом событии, поэтому у всех трёх смерженных PR
+  # (#1-#3, замер по check-runs: 0) машинной проверки не было вовсе - гейтом был
+  # человек, жмущий Merge. Фильтр paths тут вреден: PR, который правит tools/ или сам
+  # сценарий, снова получил бы "проверок 0", то есть ту же дыру другой формы.
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
   schedule:
     # раз в сутки, чтобы релиз latest не устаревал даже без правок
@@ -431,7 +438,10 @@ jobs:
           sing-box check -c /tmp/t.json
           echo "ads.srs: принят sing-box, $(stat -c%s dist/ads.srs) байт"
 
+      # Релиз latest с pull request не трогаем: файлы забирают роутер и телефоны по
+      # расписанию, и незамерженная ветка уехала бы живым людям.
       - name: Обновить релиз latest
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -458,7 +468,10 @@ jobs:
             echo "релиз создан"
           fi
 
+      # На PR этот шаг смотрел бы на ПРОШЛЫЙ релиз (мы его не обновляли) - зелёный
+      # или красный тут ничего не сказал бы о самой правке.
       - name: Убедиться, что файлы реально отдаются
+        if: github.event_name != 'pull_request'
         run: |
           set -e
           for f in main-domains.srs main-subnets.srs; do
@@ -479,6 +492,7 @@ jobs:
       # Синхронизатор на VPS ходит раз в 20 минут, поэтому не сверяем мгновенно,
       # а ждём: файл у пользователя обязан стать тем же, что мы только что собрали.
       - name: Дождаться, пока правила доедут до пользователя (subkv)
+        if: github.event_name != 'pull_request'
         timeout-minutes: 30
         run: |
           set -e
