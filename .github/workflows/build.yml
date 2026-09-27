@@ -25,6 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Первым делом: битая строка исходника (BOM, невидимые символы) проходит всю
+      # сборку зелёной - сверка битого с битым сходится. 25.08 BOM вернулся в
+      # src/main-domains.lst через add-domain.ps1 и месяц лежал в релизе, потому что
+      # этот шаг не был подключён.
+      - name: Имена в исходниках набираемы
+        run: python3 tools/check-src-names.py
+
       - name: Поставить sing-box (нужен только компилятор наборов)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
