@@ -30,7 +30,11 @@ $cur = Get-Content "src\main-domains.lst" |
     Where-Object { $_ -ne '' }
 $add = $Domains | Where-Object { $cur -notcontains $_ }
 if ($add) {
-    (($cur + $add) | Sort-Object -Unique) | Out-File "src\main-domains.lst" -Encoding utf8
+    # Out-File -Encoding utf8 в PowerShell 5.1 пишет файл С меткой BOM: чтение выше её
+    # срезало, а запись ставила обратно первой строке. Так 25.08 addyosmani.com снова
+    # уехал в набор битым. Пишем UTF-8 без метки.
+    $srcPath = Join-Path (Get-Location) "src\main-domains.lst"
+    [System.IO.File]::WriteAllLines($srcPath, [string[]](($cur + $add) | Sort-Object -Unique), (New-Object System.Text.UTF8Encoding $false))
     git add -A | Out-Null
     git -c user.name="HRYNdev" -c user.email="vladimirshev10@gmail.com" commit -q -m "добавлены домены: $($add -join ', ')" | Out-Null
     # git пишет в stderr не только ошибки: GitHub присылает туда уведомление
