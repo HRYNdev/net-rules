@@ -464,12 +464,27 @@ jobs:
           fi
           # Релиз НЕ удаляем: между удалением и созданием файлы недоступны,
           # и потребители в этот момент получают 404. Обновляем файлы на месте.
+          # Суммы файлов релиза: sync-rules.sh на VPS сверяет с ними всё, что скачал,
+          # и при несовпадении оставляет прежние наборы. Считаются по файлам, которые
+          # лягут в релиз. В режиме запасного набора ads.srs в dist уже нет, а в релизе
+          # лежит прежний: его сумму берём с самого релиза. Файл сумм заливается ПОСЛЕ
+          # наборов: синхронизатор, зашедший посередине, увидит новые наборы со старыми
+          # суммами, не примет их и повторит через 20 минут.
+          (cd dist && sha256sum *.srs *.json) > /tmp/sha256sums.txt
+          if [ -n "$ADS_FALLBACK" ]; then
+            mkdir -p /tmp/ads-prev
+            gh release download latest --pattern ads.srs --dir /tmp/ads-prev --clobber
+            (cd /tmp/ads-prev && sha256sum ads.srs) >> /tmp/sha256sums.txt
+          fi
+          sort -k2 /tmp/sha256sums.txt -o dist/sha256sums.txt
+          echo "суммы релиза:"; cat dist/sha256sums.txt
           if gh release view latest >/dev/null 2>&1; then
             gh release upload latest dist/*.srs dist/*.json --clobber
+            gh release upload latest dist/sha256sums.txt --clobber
             gh release edit latest --notes "Обновлено $(date -u '+%Y-%m-%d %H:%M UTC') из src/$NOTE"
             echo "релиз обновлён без окна недоступности"
           else
-            gh release create latest dist/*.srs dist/*.json \
+            gh release create latest dist/*.srs dist/*.json dist/sha256sums.txt \
               --title "latest" \
               --notes "Собрано $(date -u '+%Y-%m-%d %H:%M UTC') из src/"
             echo "релиз создан"
